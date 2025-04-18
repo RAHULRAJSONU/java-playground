@@ -49,18 +49,6 @@ public class WeatherAnalyticsSummary {
         return this;
     }
 
-    double averageTemperature() {
-        return totalTemperature / count;
-    }
-
-    double averageWindSpeed() {
-        return totalWindSpeed / count;
-    }
-
-    double averageHumidity() {
-        return totalHumidity / count;
-    }
-
     public double getTotalTemperature() {
         return totalTemperature;
     }
