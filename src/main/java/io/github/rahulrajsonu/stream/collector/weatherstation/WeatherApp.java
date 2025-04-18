@@ -2,6 +2,7 @@ package io.github.rahulrajsonu.stream.collector.weatherstation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.github.rahulrajsonu.utility.Utility;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -20,7 +21,8 @@ public class WeatherApp {
 
         System.out.println(readings.stream().collect(analyze()));
         System.out.println("Station Wise analytics");
-        printAsPrettyJson(readings.stream().collect(Collectors.groupingBy(WeatherReading::stationId, analyze())));
+        Map<String, WeatherAnalyticsSummary> weatherSummary = readings.stream().collect(Collectors.groupingBy(WeatherReading::stationId, analyze()));
+        Utility.printAsPrettyJson(weatherSummary);
     }
 
     public static Collector<WeatherReading, WeatherAnalyticsSummary, WeatherAnalyticsSummary> analyze(){
@@ -31,18 +33,5 @@ public class WeatherApp {
                 Collector.Characteristics.UNORDERED,
                 Collector.Characteristics.IDENTITY_FINISH
         );
-    }
-
-    public static void printAsPrettyJson(Map<String, WeatherAnalyticsSummary> stationSummaries) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.enable(SerializationFeature.INDENT_OUTPUT); // for pretty print
-
-            String jsonOutput = mapper.writeValueAsString(stationSummaries);
-            System.out.println(jsonOutput);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 }
