@@ -15,127 +15,108 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 public class IplAnalyticsAppUsingMappedMemoryFiles {
+
     public static void main(String[] args) throws IOException {
         String filePath = "C:/Users/Development/Documents/Workspace/datasets/deliveries.csv";
-        Comparator<Map.Entry<String, BowlerSummary>> bowlerComparator = Map.Entry.comparingByValue(Comparator.comparing(BowlerSummary::getWickets).reversed());
-        Utility.printAsPrettyJson(loadAndAnalyze(filePath, IplAnalyticsAppUsingMappedMemoryFiles::getBallerAnalytics, Boolean.TRUE, bowlerComparator));
+
+        Comparator<Map.Entry<String, BowlerSummary>> byWicketsDesc =
+                Map.Entry.comparingByValue(Comparator.comparingInt(BowlerSummary::getWickets).reversed());
+
+        Map<String, BowlerSummary> analytics = loadAndAnalyze(
+                filePath,
+                IplAnalyticsAppUsingMappedMemoryFiles::computeBowlerStats,
+                true,
+                byWicketsDesc
+        );
+
+        Utility.printAsPrettyJson(analytics);
     }
 
-    private static Map<String, BowlerSummary> getBallerAnalytics(List<BallEvent> events, Comparator<Map.Entry<String, BowlerSummary>> bowlerComparator) {
-        Map<String, BowlerSummary> ballerAnalytics = events.stream()
-                .parallel()
-                .collect(
-                        Collectors.groupingBy(
-                                BallEvent::bowler,
-                                Collector.of(
-                                        BowlerSummary::new,
-                                        BowlerSummary::add,
-                                        (l,r)->{l.combine(r);return l;},
-                                        Collector.Characteristics.IDENTITY_FINISH
-                                )
+    private static Map<String, BowlerSummary> computeBowlerStats(
+            List<BallEvent> events,
+            Comparator<Map.Entry<String, BowlerSummary>> comparator) {
+
+        return events.stream()
+                .collect(Collectors.groupingBy(
+                        BallEvent::bowler,
+                        Collector.of(
+                                BowlerSummary::new,
+                                BowlerSummary::add,
+                                (l, r) -> {
+                                    l.combine(r);
+                                    return l;
+                                },
+                                Collector.Characteristics.IDENTITY_FINISH
                         )
-                )
-                .entrySet()
-                .stream()
-                .sorted(bowlerComparator)
-                .collect(
-                        Collectors.toMap(
-                                Map.Entry::getKey,
-                                Map.Entry::getValue,
-                                (a,b)->a,
-                                LinkedHashMap::new)
-                )
-                .entrySet()
-                .stream()
-                .collect(
-                Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        (a,b)->a,
-                        LinkedHashMap::new)
-        );
-        return ballerAnalytics;
+                ));
     }
 
     public static Map<String, BowlerSummary> loadAndAnalyze(
             String path,
             BiFunction<List<BallEvent>, Comparator<Map.Entry<String, BowlerSummary>>, Map<String, BowlerSummary>> analyzer,
             boolean skipHeader,
-            Comparator<Map.Entry<String, BowlerSummary>> bowlerComparator) throws IOException {
+            Comparator<Map.Entry<String, BowlerSummary>> comparator) throws IOException {
+
         Path filePath = Paths.get(path);
         long fileSize = Files.size(filePath);
-        var batchSize = 10_000;
-        Map<String, BowlerSummary> store = new LinkedHashMap<>();
-        try (FileChannel fileChannel = FileChannel.open(filePath, StandardOpenOption.READ)) {
-            MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+        int batchSize = 10_000;
 
-            // Line reading variables
-            StringBuilder lineBuilder = new StringBuilder();
-            List<BallEvent> eventBatch = new ArrayList<>();
+        Map<String, BowlerSummary> aggregatedStats = new LinkedHashMap<>();
+
+        try (FileChannel channel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+
+            StringBuilder lineBuilder = new StringBuilder(200);
+            List<BallEvent> batch = new ArrayList<>(batchSize);
+            boolean isHeader = skipHeader;
 
             while (buffer.hasRemaining()) {
                 char c = (char) buffer.get();
                 if (c == '\n') {
                     String line = lineBuilder.toString();
-                    if(skipHeader){
-                        skipHeader = Boolean.FALSE;
-                        lineBuilder.setLength(0);
+                    lineBuilder.setLength(0);
+
+                    if (isHeader) {
+                        isHeader = false;
                         continue;
                     }
-                    BallEvent event = BallEvent.parse(line);
-                    if (event != null) eventBatch.add(event);
 
-                    // Process batch when enough records are collected (say 10,000)
-                    if (eventBatch.size() >= batchSize) {
-                        Map<String, BowlerSummary> partialBatchResult = analyzer.apply(eventBatch, bowlerComparator);
-                        merge(partialBatchResult, store, bowlerComparator);
-                        partialBatchResult.clear();
-                        eventBatch.clear();
+                    BallEvent event = BallEvent.parse(line);
+                    if (event != null) batch.add(event);
+
+                    if (batch.size() >= batchSize) {
+                        merge(analyzer.apply(batch, comparator), aggregatedStats);
+                        batch.clear();
                     }
-                    lineBuilder.setLength(0);
                 } else {
                     lineBuilder.append(c);
                 }
             }
 
-            // process remaining records
-            if (!eventBatch.isEmpty()) {
-                merge(analyzer.apply(eventBatch, bowlerComparator), store, bowlerComparator);
+            // Remaining records
+            if (!batch.isEmpty()) {
+                merge(analyzer.apply(batch, comparator), aggregatedStats);
             }
         }
-        return store.entrySet()
-                .stream()
-                .sorted(bowlerComparator)
-                .collect(Collectors.collectingAndThen(
-                        Collectors.toMap(
-                                Map.Entry::getKey,
-                                Map.Entry::getValue,
-                                (m1,m2)->m1,
-                                LinkedHashMap::new
-                        ),
-                        m->
-                                m.entrySet()
-                                        .stream()
-                                        .limit(5)
-                                        .collect(Collectors.toMap(
-                                                Map.Entry::getKey,
-                                                Map.Entry::getValue,
-                                                (m1,m2)->m1,
-                                                LinkedHashMap::new
-                                        ))
+
+        // Final sorting & top 5 selection
+        return aggregatedStats.entrySet().stream()
+                .sorted(comparator)
+                .limit(5)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (a, b) -> a,
+                        LinkedHashMap::new
                 ));
     }
 
-    private static void merge(
-            Map<String, BowlerSummary> partialBatchResult,
-            Map<String, BowlerSummary> store,
-            Comparator<Map.Entry<String, BowlerSummary>> bowlerComparator) {
-        partialBatchResult.forEach((key, value) -> store.merge(
-                key,
-                value,
-                (s, p) -> {
-                    s.combine(p);
-                    return s;
+    private static void merge(Map<String, BowlerSummary> batchResult, Map<String, BowlerSummary> store) {
+        batchResult.forEach((key, value) ->
+                store.merge(key, value, (existing, incoming) -> {
+                    existing.combine(incoming);
+                    return existing;
                 }));
     }
 }
+
