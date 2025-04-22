@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 public class IplAnalyticsAppUsingMappedMemoryFiles {
 
     public static void main(String[] args) throws IOException {
+        final long startTime = System.currentTimeMillis();
         String filePath = "C:/Users/Development/Documents/Workspace/datasets/deliveries.csv";
 
         Comparator<Map.Entry<String, BowlerSummary>> byWicketsDesc =
@@ -30,6 +31,7 @@ public class IplAnalyticsAppUsingMappedMemoryFiles {
         );
 
         Utility.printAsPrettyJson(analytics);
+        System.out.println("Processed in total: "+(System.currentTimeMillis()-startTime));
     }
 
     private static Map<String, BowlerSummary> computeBowlerStats(
