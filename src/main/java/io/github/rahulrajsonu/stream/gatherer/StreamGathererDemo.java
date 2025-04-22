@@ -3,6 +3,7 @@ package io.github.rahulrajsonu.stream.gatherer;
 import io.github.rahulrajsonu.stream.BlogPost;
 import io.github.rahulrajsonu.utility.Utility;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -13,7 +14,8 @@ public class StreamGathererDemo {
 //        recentPostsByCategoryUsingMapAndTransform(BlogPost.getSampleBlogPosts())
 //                .forEach((k,v)->System.out.println(k+" -> "+v.size()));
 //        groupByWithLimit(BlogPost.getSampleBlogPosts(), 2);
-        relatedPost(sampleBlogPosts,sampleBlogPosts.getFirst(), 3);
+//        relatedPost(sampleBlogPosts,sampleBlogPosts.getFirst(), 3);
+        calculateReadingTime(sampleBlogPosts);
     }
 
     //Get Post by Category
@@ -74,5 +76,18 @@ public class StreamGathererDemo {
                 .findFirst()
                 .orElse(List.of());
         Utility.printAsPrettyJson(relatedPosts);
+    }
+
+    public static void calculateReadingTime(List<BlogPost> posts){
+        Map<Long, Duration> durationMap = posts.stream()
+                .gather(BlogGatherers.calculateReadingTimes())
+                .flatMap(map -> map.entrySet().stream())
+                .collect(
+                        Collectors.toMap(
+                                Map.Entry::getKey,
+                                Map.Entry::getValue
+                        )
+                );
+        System.out.println(durationMap);
     }
 }

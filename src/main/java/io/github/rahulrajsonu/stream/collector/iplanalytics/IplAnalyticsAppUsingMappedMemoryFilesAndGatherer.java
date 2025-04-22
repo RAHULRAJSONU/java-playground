@@ -10,11 +10,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collector;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
+import java.util.stream.Gatherer;
 
-public class IplAnalyticsAppUsingMappedMemoryFiles {
+public class IplAnalyticsAppUsingMappedMemoryFilesAndGatherer {
 
     public static void main(String[] args) throws IOException {
         final long startTime = System.currentTimeMillis();
@@ -25,7 +25,7 @@ public class IplAnalyticsAppUsingMappedMemoryFiles {
 
         Map<String, BowlerSummary> analytics = loadAndAnalyze(
                 filePath,
-                IplAnalyticsAppUsingMappedMemoryFiles::computeBowlerStats,
+                IplAnalyticsAppUsingMappedMemoryFilesAndGatherer::computeBowlerStats,
                 true,
                 byWicketsDesc
         );
@@ -34,26 +34,38 @@ public class IplAnalyticsAppUsingMappedMemoryFiles {
         System.out.println("Processed in total: "+(System.currentTimeMillis()-startTime));
     }
 
-    private static Map<String, BowlerSummary> computeBowlerStats(List<BallEvent> events) {
+    private static Gatherer<BallEvent, Map<String, BowlerSummary>, Map<String, BowlerSummary>> bowlerStatsGatherer(){
+        return Gatherer.ofSequential(
+               HashMap::new,
+                (map, event, downstream)->{
+                   map.computeIfAbsent(event.bowler(), k->new BowlerSummary()).add(event);
+                   return true;
+                },
+                (stats, downstream)-> downstream.push(stats)
+        );
+    }
+
+    private static Map<String, BowlerSummary> computeBowlerStats(
+            List<BallEvent> events,
+            Gatherer<BallEvent, Map<String, BowlerSummary>, Map<String, BowlerSummary>> bowlerStatsGatherer) {
 
         return events.stream()
-                .collect(Collectors.groupingBy(
-                        BallEvent::bowler,
-                        Collector.of(
-                                BowlerSummary::new,
-                                BowlerSummary::add,
-                                (l, r) -> {
-                                    l.combine(r);
-                                    return l;
-                                },
-                                Collector.Characteristics.IDENTITY_FINISH
+                .gather(bowlerStatsGatherer)
+                .flatMap(m->m.entrySet().stream())
+                .collect(
+                        Collectors.toMap(
+                                Map.Entry::getKey,
+                                Map.Entry::getValue
                         )
-                ));
+                );
     }
 
     public static Map<String, BowlerSummary> loadAndAnalyze(
             String path,
-            Function<List<BallEvent>, Map<String, BowlerSummary>> analyzer,
+            BiFunction<
+                    List<BallEvent>,
+                    Gatherer<BallEvent, Map<String, BowlerSummary>, Map<String, BowlerSummary>>,
+                    Map<String, BowlerSummary>> analyzer,
             boolean skipHeader,
             Comparator<Map.Entry<String, BowlerSummary>> comparator) throws IOException {
 
@@ -85,7 +97,7 @@ public class IplAnalyticsAppUsingMappedMemoryFiles {
                     if (event != null) batch.add(event);
 
                     if (batch.size() >= batchSize) {
-                        merge(analyzer.apply(batch), aggregatedStats);
+                        merge(analyzer.apply(batch, bowlerStatsGatherer()), aggregatedStats);
                         batch.clear();
                     }
                 } else {
@@ -95,7 +107,7 @@ public class IplAnalyticsAppUsingMappedMemoryFiles {
 
             // Remaining records
             if (!batch.isEmpty()) {
-                merge(analyzer.apply(batch), aggregatedStats);
+                merge(analyzer.apply(batch, bowlerStatsGatherer()), aggregatedStats);
             }
         }
 

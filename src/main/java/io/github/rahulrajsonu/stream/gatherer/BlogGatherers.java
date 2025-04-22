@@ -104,9 +104,7 @@ public final class BlogGatherers {
                     return true;
                 },
                 // finisher
-                (tagCount, downstream)->{
-                    downstream.push(tagCount);
-                }
+                (tagCount, downstream)-> downstream.push(tagCount)
         );
     }
 

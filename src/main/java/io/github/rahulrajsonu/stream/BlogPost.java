@@ -17,7 +17,7 @@ public record BlogPost(
                         1L,
                         "Understanding Java Records: A Modern Approach to Data Carriers",
                         "Alice Johnson",
-                        "Java Records simplify the creation of immutable data carriers. Learn how to use them effectively in your codebase.",
+                        "Java Records simplify the creation of immutable data carriers. Learn how to use them effectively in your codebase.Java Records simplify the creation of immutable data carriers. Learn how to use them effectively in your codebase.Java Records simplify the creation of immutable data carriers. Learn how to use them effectively in your codebase.",
                         "Java",
                         LocalDateTime.of(2025, 4, 10, 9, 30)
                 ),
@@ -25,7 +25,7 @@ public record BlogPost(
                         2L,
                         "10 Spring Boot Tips You Should Know",
                         "Bob Carter",
-                        "Spring Boot makes Java backend development smooth. Here are 10 tips that will improve your workflow.",
+                        "Spring Boot makes Java backend development smooth. Here are 10 tips that will improve your workflow.Spring Boot makes Java backend development smooth. Here are 10 tips that will improve your workflow.Spring Boot makes Java backend development smooth. Here are 10 tips that will improve your workflow.Spring Boot makes Java backend development smooth. Here are 10 tips that will improve your workflow.",
                         "Spring Boot",
                         LocalDateTime.of(2025, 4, 8, 14, 15)
                 ),
