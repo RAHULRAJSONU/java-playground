@@ -1,6 +1,7 @@
 package io.github.rahulrajsonu.functionalInterface;
 
 import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class BiFunctionDemo {
     public static void main(String[] args) {

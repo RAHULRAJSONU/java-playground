@@ -3,86 +3,135 @@ package io.github.rahulrajsonu.stream.collector.iplanalytics;
 import io.github.rahulrajsonu.utility.Utility;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.BiFunction;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class IplAnalyticsApp {
-    public static void main(String[] args) {
-        List<BallEvent> events = loadDataset("C:/Users/Development/Documents/Workspace/datasets/deliveries.csv");
-        Map<String, BowlerSummary> ballerAnalytics = events.stream()
-                .parallel()
-                .collect(
-                        Collectors.groupingBy(
-                                BallEvent::bowler,
-                                Collector.of(
-                                        BowlerSummary::new,
-                                        BowlerSummary::add,
-                                        (l,r)->{l.combine(r);return l;},
-                                        Collector.Characteristics.IDENTITY_FINISH
-                                )
-                        )
-                )
-                .entrySet()
-                .stream()
-                .sorted(Map.Entry.comparingByValue(Comparator.comparing(BowlerSummary::getWickets).reversed()))
-                .collect(
-                        Collectors.toMap(
-                                Map.Entry::getKey,
-                                Map.Entry::getValue,
-                                (a,b)->a,
-                                LinkedHashMap::new)
-                )
-                .entrySet()
-                .stream()
-                .limit(5)
-                .collect(
-                Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        (a,b)->a,
-                        LinkedHashMap::new)
+
+    private static final int BATCH_SIZE = 10_000;
+    private static final int THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
+
+    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
+        final long startTime = System.currentTimeMillis();
+        String filePath = "C:/Users/Development/Documents/Workspace/datasets/deliveries.csv";
+
+        Comparator<Map.Entry<String, BowlerSummary>> byWicketsDesc =
+                Map.Entry.comparingByValue(Comparator.comparingInt(BowlerSummary::getWickets).reversed());
+
+        Map<String, BowlerSummary> analytics = loadAndAnalyzeParallel(
+                filePath,
+                IplAnalyticsApp::computeBowlerStats,
+                true,
+                byWicketsDesc
         );
-        Utility.printAsPrettyJson(ballerAnalytics);
+
+        Utility.printAsPrettyJson(analytics);
+        System.out.println("Processed in total: "+(System.currentTimeMillis()-startTime));
     }
 
-    public static List<BallEvent> loadDataset(String path) {
-        try(Stream<String> lines = Files.lines(Path.of(path))) {
-                return lines.skip(1)
-                        .map(line->{
-                            try {
-                                String[] columns = line.split(",");
-                                return new BallEvent(
-                                        Integer.parseInt(columns[0]),
-                                        Integer.parseInt(columns[1]),
-                                        columns[2],
-                                        columns[3],
-                                        Integer.parseInt(columns[4]),
-                                        Integer.parseInt(columns[5]),
-                                        columns[6],
-                                        columns[7],
-                                        columns[8],
-                                        Integer.parseInt(columns[9]),
-                                        Integer.parseInt(columns[10]),
-                                        Integer.parseInt(columns[11]),
-                                        columns[12],
-                                        Integer.parseInt(columns[13])==1,
-                                        columns[14],
-                                        columns[15],
-                                        columns[16]
+    public static Map<String, BowlerSummary> loadAndAnalyzeParallel(
+            String path,
+            BiFunction<List<BallEvent>, Comparator<Map.Entry<String, BowlerSummary>>, Map<String, BowlerSummary>> analyzer,
+            boolean skipHeader,
+            Comparator<Map.Entry<String, BowlerSummary>> comparator) throws IOException, InterruptedException, ExecutionException {
 
-                                );
-                            }catch (Exception e){
-                                return null;
-                            }
-                        })
-                        .filter(Objects::nonNull)
-                        .toList();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        Path filePath = Paths.get(path);
+        long fileSize = Files.size(filePath);
+
+        ConcurrentHashMap<String, BowlerSummary> store = new ConcurrentHashMap<>();
+
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        List<Future<?>> futures = new ArrayList<>();
+
+        try (FileChannel channel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+
+            StringBuilder lineBuilder = new StringBuilder(200);
+            List<BallEvent> batch = new ArrayList<>(BATCH_SIZE);
+            boolean isHeader = skipHeader;
+
+            while (buffer.hasRemaining()) {
+                char c = (char) buffer.get();
+                if (c == '\n') {
+                    String line = lineBuilder.toString();
+                    lineBuilder.setLength(0);
+
+                    if (isHeader) {
+                        isHeader = false;
+                        continue;
+                    }
+
+                    BallEvent event = BallEvent.parse(line);
+                    if (event != null) batch.add(event);
+
+                    if (batch.size() >= BATCH_SIZE) {
+                        List<BallEvent> batchCopy = new ArrayList<>(batch);
+                        futures.add(executor.submit(() -> {
+                            Map<String, BowlerSummary> partialResult = analyzer.apply(batchCopy, comparator);
+                            partialResult.forEach((key, value) -> store.merge(key, value, (existing, incoming) -> {
+                                existing.combine(incoming);
+                                return existing;
+                            }));
+                        }));
+                        batch.clear();
+                    }
+                } else {
+                    lineBuilder.append(c);
+                }
+            }
+
+            // Remaining records
+            if (!batch.isEmpty()) {
+                List<BallEvent> batchCopy = new ArrayList<>(batch);
+                futures.add(executor.submit(() -> {
+                    Map<String, BowlerSummary> partialResult = analyzer.apply(batchCopy, comparator);
+                    partialResult.forEach((key, value) -> store.merge(key, value, (existing, incoming) -> {
+                        existing.combine(incoming);
+                        return existing;
+                    }));
+                }));
+            }
         }
+
+        // Wait for all tasks to finish
+        for (Future<?> f : futures) f.get();
+
+        executor.shutdown();
+
+        // Final sort and top-5 selection
+        return store.entrySet().stream()
+                .sorted(comparator)
+                .limit(5)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
+    }
+
+    private static Map<String, BowlerSummary> computeBowlerStats(
+            List<BallEvent> events,
+            Comparator<Map.Entry<String, BowlerSummary>> comparator) {
+
+        return events.stream()
+                .collect(Collectors.groupingBy(
+                        BallEvent::bowler,
+                        Collector.of(
+                                BowlerSummary::new,
+                                BowlerSummary::add,
+                                (l, r) -> {
+                                    l.combine(r);
+                                    return l;
+                                },
+                                Collector.Characteristics.IDENTITY_FINISH
+                        )
+                ));
     }
 }
