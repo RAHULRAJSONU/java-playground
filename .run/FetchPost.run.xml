@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="FetchPost" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="io.github.rahulrajsonu.nativejson.FetchPost" />
+    <module name="java-playground" />
+    <option name="VM_PARAMETERS" value="--add-modules jdk.incubator.json --enable-native-access=ALL-UNNAMED" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
