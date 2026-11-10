@@ -20,7 +20,8 @@ public class RateLimitSimulatorApplication {
 
     private static void simulateConcurrentExecution(RateLimiter rateLimiter, AtomicLong fakeTime) throws Exception{
         int totalRequest = 1_000;
-        UUID clientId = UUID.fromString("862261e9-0253-42c4-95d3-76e769d48bd8");
+//        UUID clientId = UUID.fromString("862261e9-0253-42c4-95d3-76e769d48bd8");
+        UUID clientId = UUID.fromString("dcd23d1c-3c4d-472e-808a-6f9b136a9b9b");
 
         AtomicInteger allowed = new AtomicInteger();
         AtomicInteger rejected = new AtomicInteger();
